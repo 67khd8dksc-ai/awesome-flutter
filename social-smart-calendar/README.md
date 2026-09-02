@@ -4,18 +4,26 @@ Drop-in replacements for the messaging feature exported from Lovable, plus the
 SQL migrations behind them. Copy each file over the matching path in your app.
 
 ```
-src/lib/messaging.ts                     replaces yours
-src/hooks/useChat.ts                     replaces yours
-src/components/messages/Composer.tsx     replaces yours
-src/routes/messages/$id.tsx              replaces yours
+src/lib/messaging.ts                          replaces yours
+src/hooks/useChat.ts                          replaces yours
+src/components/messages/Composer.tsx          replaces yours
+src/components/messages/ChatAvatar.tsx        replaces yours
+src/components/messages/MessageBubble.tsx     replaces yours
+src/components/messages/NewConversation.tsx   replaces yours
+src/routes/messages/$id.tsx                   replaces yours
+src/routes/index.tsx                          replaces yours
 supabase/migrations/0001_messaging_schema.sql
 supabase/migrations/0002_messaging_hardening.sql
 supabase/migrations/0003_conversation_overview.sql
 ```
 
-Unchanged and not included: `ChatAvatar.tsx`, `MessageBubble.tsx`,
-`NewConversation.tsx`, `lib/message-kit.ts`, `routes/messages/index.tsx`,
+Unchanged and not included: `lib/message-kit.ts`, `routes/messages/index.tsx`,
 `integrations/supabase/types.ts`, `routeTree.gen.ts`.
+
+**Check one thing before building:** `src/routes/index.tsx` now sets RSVP with the
+literals `"going"` and `"maybe"`. Those match the button labels, but the `Rsvp`
+union lives in `@/data/events`, which wasn't available here — if it spells them
+differently, TypeScript will point at the two `setRsvp` calls.
 
 After applying migration `0003`, re-run `supabase gen types typescript` so
 `conversation_overview` lands in the generated `Database` type. The client works
@@ -94,6 +102,63 @@ was about to deliver anyway.
 - The typing indicator clears after 3 seconds idle and when you leave the page,
   instead of lingering until your next send.
 - The composer textarea grows with its content up to its `max-h-32`.
+
+## Second pass — the remaining files
+
+**Message actions were unreachable on phones.**
+React, reply, edit and delete lived behind `opacity-0 group-hover:opacity-100`.
+Touch devices have no hover, so on the mobile layout this app is built for, the
+only way to reach them was a hardware keyboard. They're now visible by default
+and only hover-revealed from `sm` up.
+
+**Delete for everyone had no confirmation.** One stray tap destroyed a message
+for every participant, permanently. It now asks through a sonner toast.
+
+**Broken avatars.** Apple and Google avatar URLs expire; `<img>` had no `onError`,
+so the chat list filled with broken-image icons. Falls back to initials now.
+
+**The new-conversation dialog wasn't really a dialog.** `role="dialog"
+aria-modal="true"` with no focus moved into it, no focus returned to the opener
+on close, and an Escape handler on a non-focusable `<div>` that did nothing until
+you'd already clicked inside. Focus, Escape and backdrop-click all work now, and
+the Escape listener is registered once on mount — hanging it off the `onClose`
+prop would have re-run on every render and stolen focus mid-keystroke.
+
+**"Going" and "Maybe" on invite cards did nothing.** They were `<span>`s inside
+the card's own button, so tapping either just opened the detail sheet. They're
+real buttons that set the RSVP now.
+
+**Home screen greeted everyone as Joel on September 2.** Both the name and the
+date were hardcoded; the name now comes from the session and the date from the
+clock.
+
+**Avatar stack computed a third avatar it never rendered** (`slice(0, 3)` then
+`slice(0, 2)`). Trimmed, and groups larger than two now show a `+N` badge.
+
+**Reaction picker ignored Escape.** It does now.
+
+## Known issues left alone
+
+These need decisions or code that isn't in these files:
+
+- **`Add to calendar`, `Save` and the create-event `+` button have no handlers.**
+  Dead controls on the home screen.
+- **RSVPs are `useState` only** — never written to Supabase, so they reset on
+  navigation and are invisible to anyone else. The calendar half of the app still
+  runs entirely on the `EVENTS`/`DISCOVER` constants in `@/data/events`.
+- **`imported_events` and `user_preferences` have no RLS in any migration seen
+  here.** They exist in the generated types, and the migrations you have cover
+  only messaging and `profiles`. If those two tables were created without
+  policies, every user's calendar imports and settings are readable by any
+  signed-in user — worth checking in the Supabase dashboard.
+- **`"Seen"` in a group means "at least one other person read it"**, since the
+  cutoff is the max of the others' `last_read_at`. Fine for a DM, generous for a
+  group.
+- **GIFs are hotlinked from `media.giphy.com`** as a fixed list of eight. No
+  attribution, and the URLs can rot; Giphy's SDK/API is the supported route if
+  this becomes more than a demo.
+- **`findDirectConversation`** matches on `is_group = false` alone, so a DM that
+  ever had a third member added would still resolve as that pair's direct chat.
 
 ## Not verified here
 
